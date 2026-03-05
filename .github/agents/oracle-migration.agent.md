@@ -28,6 +28,7 @@ Your job is to help migrate Oracle to a target database (default: PostgreSQL) by
 - Inventory: `oracle-migration mcp-inventory --schema MYSCHEMA --json`
 - Plan: `oracle-migration mcp-plan --schema MYSCHEMA`
 - Analyze + write outputs: `oracle-migration mcp-analyze --schema MYSCHEMA`
+- Pipeline (analyze + structure + PL/SQL export + conversion): `oracle-migration mcp-run --schema MYSCHEMA --target-language python`
 - Read-only query: `oracle-migration mcp-query "SELECT 1 AS ok FROM dual"`
 
 ## Output Format

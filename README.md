@@ -50,6 +50,12 @@ oracle-migration mcp-plan --schema MYSCHEMA --connection-string "host:1521/servi
 # MCP-baseret analyse (skriver outputfiler til ./generated)
 oracle-migration mcp-analyze --schema MYSCHEMA --connection-string "host:1521/service" --user "readonly" --password-env ORAPWD
 
+# End-to-end pipeline (analyse + best-practice struktur + PL/SQL export + konvertering)
+oracle-migration mcp-run --schema MYSCHEMA --target-language python --connection-string "host:1521/service" --user "readonly" --password-env ORAPWD
+
+# Claude (Anthropic) til analyse (DDD/EDA). Kræver env var ANTHROPIC_API_KEY.
+oracle-migration mcp-run --use-claude --schema MYSCHEMA --target-language python --connection-string "host:1521/service" --user "readonly" --password-env ORAPWD
+
 # MCP-based query (read-only)
 oracle-migration mcp-query "SELECT 1 AS ok FROM dual" --connection-string "host:1521/service" --user "readonly" --password-env ORAPWD
 ```

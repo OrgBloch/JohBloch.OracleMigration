@@ -12,6 +12,9 @@ class McpAnalysisResult:
     pattern: str | None
     tables: list[str]
     views: list[dict[str, Any]]
+    object_counts: dict[str, int]
+    plsql_objects: list[dict[str, str]]
+    warnings: list[dict[str, Any]]
     domains: dict[str, list[str]]
     recommended_architecture: str
     join_view_count: int
@@ -22,6 +25,9 @@ class McpAnalysisResult:
             "pattern": self.pattern,
             "tables": self.tables,
             "views": self.views,
+            "object_counts": self.object_counts,
+            "plsql_objects": self.plsql_objects,
+            "warnings": self.warnings,
             "domains": self.domains,
             "recommended_architecture": self.recommended_architecture,
             "join_view_count": self.join_view_count,
@@ -99,6 +105,33 @@ def write_analysis_outputs(result: McpAnalysisResult, out_dir: str | Path) -> Pa
     md_lines.append(f"- Views (sampled): {len(result.views)}")
     md_lines.append(f"- Views containing JOIN: {result.join_view_count}")
     md_lines.append(f"- Recommended architecture: {result.recommended_architecture}")
+    if result.object_counts:
+        md_lines.append("")
+        md_lines.append("## Object counts")
+        md_lines.append("")
+        for k in sorted(result.object_counts.keys(), key=str.casefold):
+            md_lines.append(f"- {k}: {result.object_counts[k]}")
+    if result.plsql_objects:
+        md_lines.append("")
+        md_lines.append("## PL/SQL objects (sample)")
+        md_lines.append("")
+        for obj in result.plsql_objects:
+            otype = obj.get("object_type") or obj.get("OBJECT_TYPE") or ""
+            oname = obj.get("object_name") or obj.get("OBJECT_NAME") or ""
+            owner = obj.get("owner") or obj.get("OWNER") or ""
+            label = f"{owner}.{oname}" if owner else oname
+            md_lines.append(f"- {otype}: {label}")
+
+    if result.warnings:
+        md_lines.append("")
+        md_lines.append("## Warnings")
+        md_lines.append("")
+        md_lines.append(f"Count: {len(result.warnings)}")
+        md_lines.append("")
+        for w in result.warnings[:50]:
+            code = w.get("code", "warning")
+            message = w.get("message", "")
+            md_lines.append(f"- {code}: {message}")
     md_lines.append("")
     md_lines.append("## Domains (heuristic)")
     md_lines.append("")
@@ -110,4 +143,56 @@ def write_analysis_outputs(result: McpAnalysisResult, out_dir: str | Path) -> Pa
         md_lines.append("")
 
     (out_path / "analysis.md").write_text("\n".join(md_lines).rstrip() + "\n", encoding="utf-8")
+    return out_path
+
+
+def generate_architecture(domains: dict[str, list[str]], style: str) -> dict[str, Any]:
+    style_l = (style or "").strip().lower()
+    if style_l == "eda":
+        return {
+            "style": "EDA",
+            "services": sorted(domains.keys(), key=str.casefold),
+            "events": ["CustomerCreated", "OrderPlaced", "StockAdjusted"],
+        }
+    if style_l == "microservices":
+        return {
+            "style": "Microservices",
+            "services": sorted(domains.keys(), key=str.casefold),
+        }
+    return {"style": style or "Unknown", "services": sorted(domains.keys(), key=str.casefold)}
+
+
+def create_best_practice_structure(
+    out_dir: str | Path,
+    *,
+    domains: dict[str, list[str]],
+    architecture: str,
+    language: str,
+) -> Path:
+    """Create a best-practice output folder structure under out_dir.
+
+    This only creates folders; file generation is handled elsewhere.
+    """
+
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    lang = (language or "").strip().lower()
+    arch = (architecture or "").strip().lower()
+
+    if lang == "python":
+        if arch == "eda":
+            per_domain = ["domain", "events", "projections", "repositories"]
+        else:
+            per_domain = ["domain", "api", "infrastructure"]
+    else:
+        # Keep it minimal for now (stubs can be expanded later).
+        per_domain = ["domain", "api", "infrastructure"]
+
+    for domain in sorted(domains.keys(), key=str.casefold):
+        domain_path = out_path / domain
+        domain_path.mkdir(exist_ok=True)
+        for folder in per_domain:
+            (domain_path / folder).mkdir(exist_ok=True)
+
     return out_path

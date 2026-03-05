@@ -150,8 +150,121 @@ class OracleMcp:
         # Return friendly keys.
         return {k.title(): v for k, v in counts.items()}
 
+    def list_objects(
+        self,
+        *,
+        schema: str | None = None,
+        object_types: list[str] | tuple[str, ...] | None = None,
+        max_rows: int = 500,
+    ) -> list[dict[str, Any]]:
+        """List objects from ALL_OBJECTS.
+
+        This is a lightweight helper intended for inventory/analysis.
+        """
+
+        where_parts: list[str] = []
+        if schema:
+            owner = _normalize_schema_name(schema)
+            where_parts.append(f"owner = '{owner}'")
+
+        types = [t.strip().upper() for t in (object_types or []) if str(t).strip()]
+        if types:
+            safe_types = [_normalize_object_type(t) for t in types]
+            in_list = ",".join([f"'{t}'" for t in safe_types])
+            where_parts.append(f"object_type IN ({in_list})")
+
+        where = ""
+        if where_parts:
+            where = " WHERE " + " AND ".join(where_parts)
+
+        sql = (
+            "SELECT owner, object_type, object_name "
+            "FROM all_objects" + where + " "
+            "ORDER BY owner, object_type, object_name"
+        )
+        raw = self.execute_query(sql, max_rows=max_rows)
+        return _extract_rows(raw)
+
+    def get_plsql_source(
+        self,
+        *,
+        schema: str,
+        name: str,
+        object_type: str,
+        max_rows: int = 20000,
+    ) -> str:
+        """Fetch PL/SQL source from ALL_SOURCE and return as a single string.
+
+        Notes:
+        - Requires the connected user to have visibility of ALL_SOURCE for the requested owner.
+        - We validate identifiers because execute_query does not support bind variables.
+        """
+
+        owner = _normalize_schema_name(schema)
+        obj_name = _normalize_object_name(name)
+        obj_type = _normalize_object_type(object_type)
+
+        sql = (
+            "SELECT line, text "
+            "FROM all_source "
+            f"WHERE owner = '{owner}' AND name = '{obj_name}' AND type = '{obj_type}' "
+            "ORDER BY line"
+        )
+        raw = self.execute_query(sql, max_rows=max_rows)
+        rows = _extract_rows(raw)
+        lines: list[tuple[int, str]] = []
+        for r in rows:
+            line_raw = r.get("LINE") if "LINE" in r else r.get("line")
+            text_raw = r.get("TEXT") if "TEXT" in r else r.get("text")
+            try:
+                line_no = int(line_raw)
+            except Exception:
+                continue
+            lines.append((line_no, str(text_raw or "")))
+
+        lines.sort(key=lambda x: x[0])
+        return "".join([t for _, t in lines]).rstrip() + "\n"
+
 
 _SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#]*$")
+_OBJECT_NAME_RE = _SCHEMA_RE
+
+
+def _normalize_object_name(name: str) -> str:
+    n = (name or "").strip()
+    if not n:
+        raise ValueError("object name is empty")
+    if n.startswith('"') and n.endswith('"') and len(n) >= 2:
+        raise ValueError("quoted object names are not supported")
+    if not _OBJECT_NAME_RE.match(n):
+        raise ValueError("invalid object name")
+    return n.upper()
+
+
+_OBJECT_TYPE_RE = re.compile(r"^[A-Z][A-Z ]*$")
+_ALLOWED_OBJECT_TYPES = {
+    "TABLE",
+    "VIEW",
+    "SEQUENCE",
+    "TRIGGER",
+    "PROCEDURE",
+    "FUNCTION",
+    "PACKAGE",
+    "PACKAGE BODY",
+    "TYPE",
+    "TYPE BODY",
+}
+
+
+def _normalize_object_type(object_type: str) -> str:
+    t = (object_type or "").strip().upper()
+    if not t:
+        raise ValueError("object type is empty")
+    if not _OBJECT_TYPE_RE.match(t):
+        raise ValueError("invalid object type")
+    if t not in _ALLOWED_OBJECT_TYPES:
+        raise ValueError(f"unsupported object type: {t}")
+    return t
 
 
 def _normalize_schema_name(schema: str) -> str:
